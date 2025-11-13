@@ -500,6 +500,11 @@
   "Creates a persistent functional map with the given `hash-fn' and `test'."
   (raw-make-champ-map nil (coerce hash-fn 'function) (coerce test 'function)))
 
+(defun map-empty? (map)
+  "Returns true iff `map' has no entries."
+  (declare (type champ-map map))
+  (zerop (map-tree-size (champ-map-contents map))))
+
 (defun map-size (map)
   "Returns the number of entries in `map'."
   (declare (type champ-map map))
@@ -536,6 +541,8 @@ has been added or updated associating `key' with `value'."
       (raw-make-champ-map new-contents hash-fn test))))
 
 ;;; This is just one way to wrap the internal iterator.  Feel free to do it differently.
+;;; The iteration order, while a deterministic function of the hash values of the keys,
+;;; is too complicated to describe and shouldn't be counted on.
 (defun make-map-iterator (map)
   "Returns an iterator for `map' implemented as a closure.  Invoking it on
 `:get', if the iterator has pairs left, returns the next pair as two values,
@@ -566,10 +573,13 @@ exhausted; on `:more?', true iff the iterator has pairs left."
   (lock nil :read-only t))
 
 (defun make-table (hash-fn test &key synchronized?)
+  "Creates a mutable CHAMP table.  If `synchronized?` is true, writes \(via
+`table-put'\) will be locked, preventing loss of data from concurrent writes."
   (raw-make-champ-table nil (coerce hash-fn 'function) (coerce test 'function)
 			(and synchronized? (make-lock))))
 
 (defun table-empty? (table)
+  "Returns true iff `table' has no entries."
   (declare (type champ-table table))
   (zerop (map-tree-size (champ-table-contents table))))
 
@@ -579,10 +589,14 @@ exhausted; on `:more?', true iff the iterator has pairs left."
   (map-tree-size (champ-table-contents table)))
 
 (defun table-get (table key)
+  "If `map' has an entry for `key', returns the associated value and a true
+second value; otherwise returns `nil'."
   (declare (type champ-table table))
   (map-tree-lookup (champ-table-contents table) key (champ-table-hash-fn table) (champ-table-test table)))
 
 (defun table-put (table key value)
+  "Adds an entry to `table' or updates an existing entry, so that `key' maps
+to `value'."
   (declare (type champ-table table))
   (let ((contents (champ-table-contents table))
 	(hash-fn (champ-table-hash-fn table))
@@ -596,6 +610,7 @@ exhausted; on `:more?', true iff the iterator has pairs left."
 	    (map-tree-with contents key value hash-fn test)))))
 
 (defun table-remove (table key)
+  "Removes any entry for `key' from `table'."
   (declare (type champ-table table))
   (let ((contents (champ-table-contents table))
 	(hash-fn (champ-table-hash-fn table))
@@ -608,7 +623,16 @@ exhausted; on `:more?', true iff the iterator has pairs left."
       (setf (champ-table-contents table)
 	    (map-tree-less contents key hash-fn test)))))
 
+;;; This is just one way to wrap the internal iterator.  Feel free to do it differently.
+;;; The iteration order, while a deterministic function of the hash values of the keys,
+;;; is too complicated to describe and shouldn't be counted on.
 (defun make-table-iterator (table)
+  "Returns an iterator for `table' implemented as a closure.  Invoking it on
+`:get', if the iterator has pairs left, returns the next pair as two values,
+key and value.  Invoking it on `:done?' will return true iff the iterator is
+exhausted; on `:more?', true iff the iterator has pairs left.  Once the iterator
+is created, subsequent `table-put' operations will have no effect on its
+behavior."
   (declare (type champ-table table))
   (let ((iter (make-map-tree-iterator-internal (champ-table-contents table))))
     (lambda (op)
