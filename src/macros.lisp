@@ -75,11 +75,7 @@ values MUST be fixnums; the result is a fixnum."
     (apply #'sb-thread:make-mutex (and name `(:name ,name))))
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     `(sb-thread:with-mutex (,lock :wait-p ,wait?)
-       . ,body))
-  (defmacro read-memory-barrier ()
-    '(sb-thread:barrier (:read)))
-  (defmacro write-memory-barrier ()
-    '(sb-thread:barrier (:write))))
+       . ,body)))
 
 #+(and sbcl (not sb-thread))
 (progn
@@ -89,12 +85,7 @@ values MUST be fixnums; the result is a fixnum."
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore lock wait?))
     `(progn
-       . ,body))
-  (progn
-    (defmacro read-memory-barrier ()
-      'nil)
-    (defmacro write-memory-barrier ()
-      'nil)))
+       . ,body)))
 
 
 #+openmcl
@@ -118,17 +109,7 @@ values MUST be fixnums; the result is a fixnum."
 		      (ccl:with-lock-grabbed (,lock-var)
 			. ,body))
 	       (when ,try-succeeded?-var
-		 (ccl:release-lock ,lock-var)))))))
-  ;; For those implementations that support SMP but don't give us direct ways
-  ;; to generate memory barriers, we assume that grabbing a lock suffices.
-  (defvar *memory-barrier-lock*
-    (ccl:make-lock "Memory Barrier Lock"))
-  (defmacro read-memory-barrier ()
-    `(ccl:with-lock-grabbed (*memory-barrier-lock*)
-       nil))
-  (defmacro write-memory-barrier ()
-    `(ccl:with-lock-grabbed (*memory-barrier-lock*)
-       nil)))
+		 (ccl:release-lock ,lock-var))))))))
 
 
 #+(and clasp threads)
@@ -137,13 +118,7 @@ values MUST be fixnums; the result is a fixnum."
     (mp:make-lock :name (or name :anonymous)))
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore wait?))
-    `(mp:with-lock (,lock) ,@body))
-  (defvar *memory-barrier-lock*
-    (mp:make-lock :name "Memory Barrier Lock"))
-  (defmacro read-memory-barrier ()
-    '(mp:with-lock (*memory-barrier-lock*) nil))
-  (defmacro write-memory-barrier ()
-    '(mp:with-lock (*memory-barrier-lock*) nil)))
+    `(mp:with-lock (,lock) ,@body)))
 
 
 #+(and ecl (not threads))
@@ -153,11 +128,7 @@ values MUST be fixnums; the result is a fixnum."
     nil)
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore lock wait?))
-    `(progn . ,body))
-  (defmacro read-memory-barrier ()
-    'nil)
-  (defmacro write-memory-barrier ()
-    'nil))
+    `(progn . ,body)))
 
 #+(and ecl threads)
 (progn
@@ -180,17 +151,7 @@ values MUST be fixnums; the result is a fixnum."
 		      (mp:with-lock (,lock-var)
 			. ,body))
   	       (when ,try-succeeded?-var
-		 (mp:giveup-lock ,lock-var)))))))
-  (defvar *ecl-read-memory-barrier-lock*
-    (mp:make-lock :name "Read Memory Barrier Lock"))
-  (defmacro read-memory-barrier ()
-    '(mp:with-lock (*ECL-Read-Memory-Barrier-Lock*)
-       nil))
-  (defvar *ecl-write-memory-barrier-lock*
-    (mp:make-lock :name "Write Memory Barrier Lock"))
-  (defmacro write-memory-barrier ()
-    '(mp:with-lock (*ecl-write-memory-barrier-lock*)
-       nil)))
+		 (mp:giveup-lock ,lock-var))))))))
 
 
 #+abcl
@@ -201,17 +162,7 @@ values MUST be fixnums; the result is a fixnum."
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore wait?))
     `(threads:with-mutex (,lock)
-       . ,body))
-  ;; For those implementations that support SMP but don't give us direct ways
-  ;; to generate memory barriers, we assume that grabbing a lock suffices.
-  (defvar *memory-barrier-lock*
-    (threads:make-mutex))
-  (defmacro read-memory-barrier ()
-    '(threads:with-mutex (*memory-barrier-lock*)
-       nil))
-  (defmacro write-memory-barrier ()
-    '(threads:with-mutex (*memory-barrier-lock*)
-       nil)))
+       . ,body)))
 
 
 #+cmu
@@ -221,11 +172,7 @@ values MUST be fixnums; the result is a fixnum."
     nil)
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore lock wait?))
-    `(sys:without-interrupts . ,body))
-  (defmacro read-memory-barrier ()
-    'nil)
-  (defmacro write-memory-barrier ()
-    'nil))
+    `(sys:without-interrupts . ,body)))
 
 
 #+allegro
@@ -237,17 +184,7 @@ values MUST be fixnums; the result is a fixnum."
     `(mp:with-process-lock (,lock :timeout ,(cond ((eq wait? 't) nil)  ; hush, Allegro
 						  ((eq wait? 'nil) 0)
 						  (t `(if ,wait? nil 0))))
-       . ,body))
-  ;; For those implementations that support SMP but don't give us direct ways
-  ;; to generate memory barriers, we assume that grabbing a lock suffices.
-  (defvar *memory-barrier-lock*
-    (mp:make-process-lock :name "Memory Barrier Lock"))
-  (defmacro read-memory-barrier ()
-    '(mp:with-process-lock (*memory-barrier-lock*)
-       nil))
-  (defmacro write-memory-barrier ()
-    '(mp:with-process-lock (*memory-barrier-lock*)
-       nil)))
+       . ,body)))
 
 
 #+lispworks
@@ -256,17 +193,7 @@ values MUST be fixnums; the result is a fixnum."
     (apply #'mp:make-lock (and name `(:name ,name))))
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     `(mp:with-lock (,lock :timeout (if ,wait? nil 0))
-       . ,body))
-  ;; For those implementations that support SMP but don't give us direct ways
-  ;; to generate memory barriers, we assume that grabbing a lock suffices.
-  (defvar *memory-barrier-lock*
-    (mp:make-lock :name "Memory Barrier Lock"))
-  (defmacro read-memory-barrier ()
-    '(mp:with-lock (*memory-barrier-lock*)
-       nil))
-  (defmacro write-memory-barrier ()
-    '(mp:with-lock (*memory-barrier-lock*)
-       nil)))
+       . ,body)))
 
 
 #+scl
@@ -275,11 +202,7 @@ values MUST be fixnums; the result is a fixnum."
     (thread:make-lock name :type ':recursive :auto-free t))
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     `(thread:with-lock-held (,lock "Lock Wait" :wait ,wait?)
-       . ,body))
-  (defmacro read-memory-barrier ()
-    '(kernel:read-memory-barrier))
-  (defmacro write-memory-barrier ()
-    '(kernel:write-memory-barrier)))
+       . ,body)))
 
 
 #+(and genera new-scheduler)
@@ -289,11 +212,7 @@ values MUST be fixnums; the result is a fixnum."
   (defmacro with-lock ((lock &key (wait? t)) &body body)
     (declare (ignore wait?))
     `(process:with-lock (,lock)
-       . ,body))
-  (defmacro read-memory-barrier ()
-    'nil)
-  (defmacro read-memory-barrier ()
-    'nil))
+       . ,body)))
 
 
 ;;; ----------------
