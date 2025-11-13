@@ -31,4 +31,4 @@ Reasons against:
 - writes are slower: on SBCL, building a 200-entry table takes about 3x as long; for
   updating existing keys, the ratio goes to 10x, not because CHAMP gets slower but because
   SBCL gets faster
-- being portable CL code, it can't do `eq` hashing
+- being portable CL code, it can't do `eq` or `eql` hashing
