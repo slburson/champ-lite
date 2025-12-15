@@ -1,4 +1,4 @@
-= Champ-Lite
+# Champ-Lite
 
 Sometimes you need a hash table-like data structure that is iteration-safe in the presence
 of concurrent writes.  FSet's functional maps have this property; but if all you want to
