@@ -1,4 +1,4 @@
-(in-package :champ)
+(in-package :com.sympoiesis.champ)
 
 ;;; Summary (for SBCL, on Apple M2):
 ;;;   CHAMP reads (19ns) are about 15% slower than CL reads (16ns) at ~40% hit rate

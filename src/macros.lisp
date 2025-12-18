@@ -1,4 +1,4 @@
-(in-package :champ)
+(in-package :com.sympoiesis.champ)
 
 
 ;;; ----------------

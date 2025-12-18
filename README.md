@@ -32,5 +32,7 @@ Reasons against:
   updating existing keys, the ratio goes to 10x, not because CHAMP gets slower but because
   SBCL gets faster
 - being portable CL code, it can't do `eq` or `eql` hashing in general, although it can if
-  the key type is designed so support it; symbols work, as do user classes whose instances
-  are assigned serial numbers that are used for hashing
+  the key type is designed to support it; symbols work, as do user classes whose instances
+  are assigned serial numbers that are used by the hash function
+
+

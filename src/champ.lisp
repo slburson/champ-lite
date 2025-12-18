@@ -1,4 +1,4 @@
-(in-package :champ)
+(in-package :com.sympoiesis.champ)
 
 ;;; =============================================================================
 ;;; Hash map internals
@@ -497,7 +497,11 @@
   (test nil :type function :read-only t))
 
 (defun make-map (hash-fn test)
-  "Creates a persistent functional map with the given `hash-fn' and `test'."
+  "Creates a persistent functional map with the given `hash-fn' and `test'.
+The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
+is called on two key values, and returns true iff they are to be considered
+equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
+must return the same value for them."
   (raw-make-champ-map nil (coerce hash-fn 'function) (coerce test 'function)))
 
 (defun map-empty? (map)
@@ -574,7 +578,11 @@ exhausted; on `:more?', true iff the iterator has pairs left."
 
 (defun make-table (hash-fn test &key synchronized?)
   "Creates a mutable CHAMP table.  If `synchronized?` is true, writes \(via
-`table-put'\) will be locked, preventing loss of data from concurrent writes."
+`table-put'\) will be locked, preventing loss of data from concurrent writes.
+The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
+is called on two key values, and returns true iff they are to be considered
+equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
+must return the same value for them."
   (raw-make-champ-table nil (coerce hash-fn 'function) (coerce test 'function)
 			(and synchronized? (make-lock))))
 
