@@ -4,15 +4,22 @@
 ;;; ----------------
 ;;; Internals
 
+;;; These are macros because Allegro (still!) doesn't inline user functions.
 (defmacro hash-mix (&rest args)
   "Returns the \"mix\" of the values, where \"mix\" is a commutative and
 associative operation with an inverse.  All values MUST be fixnums; the
 result is a fixnum."
   ;; On implementations where we can reliably get fixnum addition and subtraction without
   ;; overflow checks at speed-3 safety-0, using them will give us better distributional properties.
+  ;; -- Oops, this doesn't quite fly on SBCL, not because it's wrong per se, but because of
+  ;; `sb-ext:restrict-compiler-policy', which lets people override my declarations.  Ironic.
+  ;; SBCL does provide another way to do it, which, however, discards the sign bit.  Oh well.
+  #+sbcl
+  `(locally (declare (optimize (speed 3) (safety 0)))  ; still desirable when possible
+     (logand most-positive-fixnum (+ . ,(mapcar (lambda (x) `(the fixnum ,x)) args))))
   ;; On other implementations, we fall back to XOR.
-  #+(or sbcl ccl allegro lispworks)
-  ;; To make SBCL happy, we have to build a binary tree with `the fixnum' at each level.
+  #+(or ccl allegro lispworks)
+  ;; We have to build a binary tree with `the fixnum' at each level.
   (labels ((build (fn expr args)
 	     (if (null args) expr
 	       (build fn `(the fixnum (,fn ,expr (the fixnum ,(car args)))) (cdr args)))))
@@ -23,13 +30,16 @@ result is a fixnum."
   ;; CLASP also checks for overflow on addition.
   #-(or sbcl ccl allegro lispworks)
   `(locally (declare (optimize (speed 3) (safety 0)))
-     (the fixnum (logxor . ,(mapcar (fn (x) `(the fixnum ,x)) args)))))
+     (the fixnum (logxor . ,(mapcar (lambda (x) `(the fixnum ,x)) args)))))
 
 (defmacro hash-unmix (hash &rest to-unmix)
   "Returns the result of \"unmixing\" each of `to-unmix' from `hash'.  All
 values MUST be fixnums; the result is a fixnum."
   ;; As above.
-  #+(or sbcl ccl allegro lispworks)
+  #+sbcl
+  `(locally (declare (optimize (speed 3) (safety 0)))  ; still desirable when possible
+     (logand most-positive-fixnum (- (the fixnum ,hash) . ,(mapcar (lambda (x) `(the fixnum ,x)) to-unmix))))
+  #+(or ccl allegro lispworks)
   (labels ((build (fn expr args)
 	     (if (null args) expr
 	       (build fn `(the fixnum (,fn ,expr (the fixnum ,(car args)))) (cdr args)))))
@@ -37,7 +47,7 @@ values MUST be fixnums; the result is a fixnum."
        ,(build '- `(the fixnum ,hash) to-unmix)))
   #-(or sbcl ccl allegro lispworks)
   `(locally (declare (optimize (speed 3) (safety 0)))
-     (the fixnum (logxor (the fixnum ,hash) . ,(mapcar (fn (x) `(the fixnum ,x)) to-unmix)))))
+     (the fixnum (logxor (the fixnum ,hash) . ,(mapcar (lambda (x) `(the fixnum ,x)) to-unmix)))))
 
 (define-modify-macro hash-mixf (&rest args)
   hash-mix)
@@ -213,6 +223,18 @@ values MUST be fixnums; the result is a fixnum."
     (declare (ignore wait?))
     `(process:with-lock (,lock)
        . ,body)))
+
+(defmacro with-lock-maybe ((lock &key (wait? t)) &body body)
+  "If `lock' is nonnull, locks it around `body'; otherwise just executes `body'."
+  (let ((lock-var (gensym "LOCK-"))
+	(body-fn (gensym "BODY-")))
+    `(let ((,lock-var ,lock))
+       (flet ((,body-fn ()
+		. ,body))
+	 (if ,lock-var
+	     (with-lock (,lock-var :wait? ,wait?)
+	       (,body-fn))
+	   (,body-fn))))))
 
 
 ;;; ----------------

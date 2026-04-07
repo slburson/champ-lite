@@ -70,7 +70,7 @@
 (defun map-tree-with (tree key value hash-fn test)
   (declare (optimize (speed 3) (safety 1))
 	   (type function hash-fn test))
-  (let ((key-hash (funcall hash-fn key)))
+  (let ((key-hash (logand (funcall hash-fn key) most-positive-fixnum)))
     (declare (fixnum key-hash))
     (labels ((rec (node hash-shifted depth)
 	       (declare (fixnum hash-shifted)
@@ -119,7 +119,7 @@
 				   (vector-update node (1+ entry-idx) value))
 			       ;; Entry with different key found: make a subnode
 			       (let* ((hash-shifted (ash hash-shifted (- hash-bits-per-level)))
-				      (ex-key-hash (the fixnum (funcall hash-fn ex-key)))
+				      (ex-key-hash (logand (funcall hash-fn ex-key) most-positive-fixnum))
 				      (ex-key-hash-shifted (ash ex-key-hash (* (- hash-bits-per-level) (1+ depth))))
 				      (n2 (if (= hash-shifted ex-key-hash-shifted)
 					      ;; Collision!
@@ -160,7 +160,7 @@
 (defun map-tree-less (tree key hash-fn test)
   (declare (optimize (speed 3) (safety 1))
 	   (type function hash-fn test))
-  (let ((key-hash (funcall hash-fn key)))
+  (let ((key-hash (logand (funcall hash-fn key) most-positive-fixnum)))
     (declare (fixnum key-hash))
     (labels ((rec (node hash-shifted depth)
 	       (declare (fixnum hash-shifted)
@@ -234,7 +234,7 @@
 (defun map-tree-lookup (tree key hash-fn test)
   (declare (optimize (speed 3) (safety 0))
 	   (type function hash-fn test))
-  (let ((key-hash (funcall hash-fn key)))
+  (let ((key-hash (logand (funcall hash-fn key) most-positive-fixnum)))
     (declare (fixnum key-hash))
     (labels ((rec (node key hash-shifted)
 	       (declare (fixnum hash-shifted))
@@ -490,24 +490,25 @@
 
 ;;; A persistent functional map.
 (defstruct (champ-map
-	     (:constructor raw-make-champ-map (contents hash-fn test))
+	     (:constructor raw-make-champ-map (contents hash-fn test &optional default))
 	     (:print-function print-map))
   (contents nil :type map-tree :read-only t)
   (hash-fn nil :type function :read-only t)
-  (test nil :type function :read-only t))
+  (test nil :type function :read-only t)
+  (default nil :read-only t))
 
-(defun make-map (hash-fn test)
+(defun make-map (hash-fn test &key default)
   "Creates a persistent functional map with the given `hash-fn' and `test'.
 The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
 is called on two key values, and returns true iff they are to be considered
 equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
 must return the same value for them."
-  (raw-make-champ-map nil (coerce hash-fn 'function) (coerce test 'function)))
+  (raw-make-champ-map nil (coerce hash-fn 'function) (coerce test 'function) default))
 
 (defun map-empty? (map)
   "Returns true iff `map' has no entries."
   (declare (type champ-map map))
-  (zerop (map-tree-size (champ-map-contents map))))
+  (null (champ-map-contents map)))
 
 (defun map-size (map)
   "Returns the number of entries in `map'."
@@ -518,7 +519,30 @@ must return the same value for them."
   "If `map' has an entry for `key', returns the associated value and a true
 second value; otherwise returns `nil'."
   (declare (type champ-map map))
-  (map-tree-lookup (champ-map-contents map) key (champ-map-hash-fn map) (champ-map-test map)))
+  (multiple-value-bind (val found?)
+      (map-tree-lookup (champ-map-contents map) key (champ-map-hash-fn map) (champ-map-test map))
+    (if found? (values val t)
+      (values (champ-map-default map) nil))))
+
+(define-setf-expander map-lookup (map key &environment env)
+  "Functionally updates `map' to associate the value being stored with the key.
+That is, assigns to the place holding `map' a new map which is the same except
+for the value at `key'; does not modify the existing map.  The `map' subform
+must be `setf'able."
+  (multiple-value-bind (temps vals stores store-form access-form)
+      (get-setf-expansion map env)
+    (let* ((key-temp (gensym "KEY-"))
+	   (val-temp (gensym "VAL-"))
+	   (coll-temp (car stores)))
+      (when (cdr stores)
+	(error "Too many values required in `setf' of `map-lookup'"))
+      (values (cons key-temp temps)
+	      (cons key vals)
+	      (list val-temp)
+	      `(let ((,coll-temp (map-with ,access-form ,key-temp ,val-temp)))
+		 ,store-form
+		 ,val-temp)
+	      `(map-lookup ,access-form ,key-temp)))))
 
 (defun map-with (map key value)
   "Returns a new map which has all the entries of `map', except that an entry
@@ -562,21 +586,23 @@ exhausted; on `:more?', true iff the iterator has pairs left."
 
 (defun print-map (map stream level)
   (declare (ignore level))
-  (format stream "#<~S, ~D entries>" 'champ-map (map-size map)))
+  (print-unreadable-object (map stream :type t)
+    (format stream "~D entries" (map-size map))))
 
 
 ;;; ----------------
 ;;; Mutable hash table
 
 (defstruct (champ-table
-	     (:constructor raw-make-champ-table (contents hash-fn test lock))
+	     (:constructor raw-make-champ-table (contents hash-fn test default lock))
 	     (:print-function print-table))
   (contents nil :type map-tree)
   (hash-fn nil :type function :read-only t)
   (test nil :type function :read-only t)
+  (default nil :read-only t)
   (lock nil :read-only t))
 
-(defun make-table (hash-fn test &key synchronized?)
+(defun make-table (hash-fn test &key default synchronized?)
   "Creates a mutable CHAMP table.  If `synchronized?` is true, writes \(via
 `table-put'\) will be locked, preventing loss of data from concurrent writes.
 The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
@@ -584,12 +610,12 @@ is called on two key values, and returns true iff they are to be considered
 equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
 must return the same value for them."
   (raw-make-champ-table nil (coerce hash-fn 'function) (coerce test 'function)
-			(and synchronized? (make-lock))))
+			default (and synchronized? (make-lock))))
 
 (defun table-empty? (table)
   "Returns true iff `table' has no entries."
   (declare (type champ-table table))
-  (zerop (map-tree-size (champ-table-contents table))))
+  (null (champ-table-contents table)))
 
 (defun table-size (table)
   "The number of entries in `table'."
@@ -600,7 +626,14 @@ must return the same value for them."
   "If `map' has an entry for `key', returns the associated value and a true
 second value; otherwise returns `nil'."
   (declare (type champ-table table))
-  (map-tree-lookup (champ-table-contents table) key (champ-table-hash-fn table) (champ-table-test table)))
+  (multiple-value-bind (val found?)
+      (map-tree-lookup (champ-table-contents table) key (champ-table-hash-fn table) (champ-table-test table))
+    (if found? (values val t)
+      (values (champ-table-default table) nil))))
+
+(defun (setf table-get) (value table key)
+  (table-put table key value)
+  value)
 
 (defun table-put (table key value)
   "Adds an entry to `table' or updates an existing entry, so that `key' maps
@@ -608,28 +641,22 @@ to `value'."
   (declare (type champ-table table))
   (let ((contents (champ-table-contents table))
 	(hash-fn (champ-table-hash-fn table))
-	(test (champ-table-test table))
-	(lock (champ-table-lock table)))
-    (if lock
-	(with-lock (lock)
-	  (setf (champ-table-contents table)
-		(map-tree-with contents key value hash-fn test)))
+	(test (champ-table-test table)))
+    (with-lock-maybe ((champ-table-lock table))
       (setf (champ-table-contents table)
-	    (map-tree-with contents key value hash-fn test)))))
+	    (map-tree-with contents key value hash-fn test)))
+    table))
 
 (defun table-remove (table key)
   "Removes any entry for `key' from `table'."
   (declare (type champ-table table))
   (let ((contents (champ-table-contents table))
 	(hash-fn (champ-table-hash-fn table))
-	(test (champ-table-test table))
-	(lock (champ-table-lock table)))
-    (if lock
-	(with-lock (lock)
-	  (setf (champ-table-contents table)
-		(map-tree-less contents key hash-fn test)))
+	(test (champ-table-test table)))
+    (with-lock-maybe ((champ-table-lock table))
       (setf (champ-table-contents table)
-	    (map-tree-less contents key hash-fn test)))))
+	    (map-tree-less contents key hash-fn test)))
+    table))
 
 ;;; This is just one way to wrap the internal iterator.  Feel free to do it differently.
 ;;; The iteration order, while a deterministic function of the hash values of the keys,
@@ -651,5 +678,6 @@ behavior."
 
 (defun print-table (table stream level)
   (declare (ignore level))
-  (format stream "#<~S, ~D entries>" 'champ-table (table-size table)))
+  (print-unreadable-object (table stream :type t)
+    (format stream "~D entries" (table-size table))))
 

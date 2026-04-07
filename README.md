@@ -18,13 +18,13 @@ generic functions.
 Here are some reasons you might want to use Champ-Lite instead of CL's built-in hash
 tables:
 
+- the functional map API lets you cheaply keep snapshots of past states
 - no need to lock readers at all
 - no concern about concurrent iterations and updates (iterations see the state as of the
   moment the iteration started)
+- single-threaded read performance is close enough to that of CL hash tables
 - multithreaded read performance can actually exceed that of CL hash tables in certain
   scenarios 
-- single-threaded read performance is close enough to that of CL hash tables
-- the functional map API lets you cheaply keep snapshots of past states
 
 Reasons against:
 
@@ -35,4 +35,26 @@ Reasons against:
   the key type is designed to support it; symbols work, as do user classes whose instances
   are assigned serial numbers that are used by the hash function
 
+NOTE: I have added `setf` functionality for both `map-lookup`, which operates on the
+persistent functional maps, and `table-get`, which operates on the mutable tables.  Though
+they appear similar, they work very differently!  `(setf (map-lookup m x) y)` updates `m`
+functionally and writes the new map value back to `m`; no aliases will see the update.
+`(setf (table-get tbl x) y)`, on the other hand, mutates `tbl`.  Examples:
 
+```common-lisp
+(let ((m (make-map #'sxhash #'equal))
+      (tbl (make-table #'sxhash #'equal)))
+  (setf (map-lookup m 'key) 'old-value)
+  (setf (table-get tbl 'key) 'old-value)
+  (let ((m-copy m)
+        (tbl-alias tbl))
+    (setf (map-lookup m 'key) 'new-value)
+    (setf (table-get tbl 'key) 'new-value)
+    (print (map-lookup m-copy 'key))      ; --> OLD-VALUE
+    (print (table-get tbl-alias 'key))    ; --> NEW-VALUE
+    ...))
+```
+
+Semantically, you can think of it as if the binding of `m-copy` made a copy, though that
+isn't actually what's happening; the difference is in the `setf` expander for
+`map-lookup`.
