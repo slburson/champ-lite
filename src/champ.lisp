@@ -502,7 +502,8 @@
 The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
 is called on two key values, and returns true iff they are to be considered
 equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
-must return the same value for them."
+must return the same value for them.  `default' will be the first value
+returned from `map-lookup` on a key not in the map."
   (raw-make-champ-map nil (coerce hash-fn 'function) (coerce test 'function) default))
 
 (defun map-empty? (map)
@@ -517,7 +518,7 @@ must return the same value for them."
 
 (defun map-lookup (map key)
   "If `map' has an entry for `key', returns the associated value and a true
-second value; otherwise returns `nil'."
+second value; otherwise, returns the map's default and false."
   (declare (type champ-map map))
   (multiple-value-bind (val found?)
       (map-tree-lookup (champ-map-contents map) key (champ-map-hash-fn map) (champ-map-test map))
@@ -608,7 +609,8 @@ exhausted; on `:more?', true iff the iterator has pairs left."
 The `hash-fn' must return fixnums; negative fixnums are okay.  The `test'
 is called on two key values, and returns true iff they are to be considered
 equal; it must be an equivalence relation.  If two keys are equal, `hash-fn'
-must return the same value for them."
+must return the same value for them.  `default' will be the first value
+returned from `table-get' on a key not in the table."
   (raw-make-champ-table nil (coerce hash-fn 'function) (coerce test 'function)
 			default (and synchronized? (make-lock))))
 
@@ -623,8 +625,8 @@ must return the same value for them."
   (map-tree-size (champ-table-contents table)))
 
 (defun table-get (table key)
-  "If `map' has an entry for `key', returns the associated value and a true
-second value; otherwise returns `nil'."
+  "If `table' has an entry for `key', returns the associated value and a true
+second value; otherwise, returns the table's default and false."
   (declare (type champ-table table))
   (multiple-value-bind (val found?)
       (map-tree-lookup (champ-table-contents table) key (champ-table-hash-fn table) (champ-table-test table))
